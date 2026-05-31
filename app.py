@@ -19,28 +19,28 @@ MODEL_PATH = Path(__file__).resolve().parent / "best.pt"
 
 CUSTOM_CSS = """
 <style>
-    .stApp {
-        background-color: #FEFCE8;
-    }
-    h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-        color: #111111 !important;
-    }
-    .stButton > button[kind="primary"],
-    .stButton > button[data-testid="baseButton-primary"] {
-        background-color: #F97316 !important;
-        border-color: #F97316 !important;
-        color: #ffffff !important;
-    }
-    .stButton > button[kind="primary"]:hover,
-    .stButton > button[data-testid="baseButton-primary"]:hover {
-        background-color: #ea580c !important;
-        border-color: #ea580c !important;
-    }
-    div[data-testid="stDownloadButton"] > button {
-        background-color: #F97316 !important;
-        border-color: #F97316 !important;
-        color: #ffffff !important;
-    }
+    /* Fix chat input box */
+.stChatInput textarea {
+    background-color: #ffffff !important;
+    color: #111111 !important;
+    border: 1px solid #F97316 !important;
+    border-radius: 8px !important;
+}
+
+.stChatInput {
+    background-color: #ffffff !important;
+}
+[data-testid="stChatInput"] {
+    background-color: #ffffff !important;
+}
+[data-testid="stChatInput"] textarea {
+    background-color: #ffffff !important;
+    color: #111111 !important;
+    border: 1px solid #F97316 !important;
+}
+.stChatFloatingInputContainer {
+    background-color: #ffffff !important;
+}
 </style>
 """
 
@@ -98,85 +98,6 @@ def _infer_dot_in_cell(cx: float, cy: float, xmin: float, ymin: float, w: float,
     row = min(2, int(ny * 3.0))
     grid = {(0, 0): 1, (0, 1): 2, (0, 2): 3, (1, 0): 4, (1, 1): 5, (1, 2): 6}
     return grid[(col, row)]
-
-
-def detections_to_text(model, result) -> str:
-    """
-    Group YOLO boxes into Braille cells (left-to-right), infer active dots per cell,
-    and convert with dots_to_char.
-    """
-    boxes = result.boxes
-    if boxes is None or len(boxes) == 0:
-        return ""
-
-    entries = []
-    for box in boxes:
-        cx, cy = _box_center_xy(box)
-        label = _label_for_box(model, box)
-        conf = float(box.conf[0])
-        entries.append(
-            {
-                "cx": cx,
-                "cy": cy,
-                "w": _box_width(box),
-                "label": label,
-                "conf": conf,
-                "box": box,
-            }
-        )
-
-    entries.sort(key=lambda e: e["cx"])
-    widths = [e["w"] for e in entries if e["w"] > 0]
-    median_w = float(np.median(widths)) if widths else 20.0
-    gap = max(median_w * 0.8, 8.0)
-
-    cells: list[list[dict]] = []
-    current: list[dict] = []
-    for entry in entries:
-        if not current:
-            current.append(entry)
-            continue
-        if entry["cx"] - current[-1]["cx"] > gap:
-            cells.append(current)
-            current = [entry]
-        else:
-            current.append(entry)
-    if current:
-        cells.append(current)
-
-    chars: list[str] = []
-    for cell_boxes in cells:
-        if len(cell_boxes) == 1:
-            from_class = _char_from_class_label(cell_boxes[0]["label"])
-            if from_class is not None and cell_boxes[0]["conf"] >= 0.35:
-                chars.append(from_class)
-                continue
-
-        xs = [b["cx"] for b in cell_boxes]
-        ys = [b["cy"] for b in cell_boxes]
-        xmin, xmax = min(xs), max(xs)
-        ymin, ymax = min(ys), max(ys)
-        pad = max(median_w * 0.25, 4.0)
-        cell_w = max(xmax - xmin, median_w) + pad * 2
-        cell_h = max(ymax - ymin, median_w) + pad * 2
-        cell_xmin = xmin - pad
-        cell_ymin = ymin - pad
-
-        active_dots: set[int] = set()
-        for item in cell_boxes:
-            dot_label = item["label"]
-            if dot_label.isdigit() and 1 <= int(dot_label) <= 6:
-                active_dots.add(int(dot_label))
-            else:
-                active_dots.add(
-                    _infer_dot_in_cell(
-                        item["cx"], item["cy"], cell_xmin, cell_ymin, cell_w, cell_h
-                    )
-                )
-
-        chars.append(dots_to_char(sorted(active_dots)))
-
-    return "".join(chars).strip()
 
 
 def run_inference(model, image_bgr: np.ndarray):
@@ -255,13 +176,23 @@ def main():
     with st.spinner("Running Braille detection…"):
         results = run_inference(model, image_bgr)
 
+    detections = []
+    for box in results[0].boxes:
+        cls_id = int(box.cls[0])
+        conf = float(box.conf[0])
+        x_center = float(box.xywh[0][0])
+        if conf > 0.4:
+            letter = model.names[cls_id]
+            detections.append((x_center, letter))
+    detections.sort(key=lambda d: d[0])
+    translated_text = ''.join([d[1] for d in detections]).upper()
+
     if not results:
         st.warning("No inference result returned.")
         _render_context_and_chat()
         return
 
     result = results[0]
-    translated = detections_to_text(model, result)
 
     left, right = st.columns([1, 1])
     with left:
@@ -278,7 +209,7 @@ def main():
             use_container_width=True,
         )
 
-    if not translated:
+    if not translated_text:
         st.warning(
             "No Braille characters detected. Try better lighting, closer framing, "
             "or a clearer view of the dots."
@@ -287,18 +218,18 @@ def main():
         _render_context_and_chat()
         return
 
-    st.session_state.translated_text = translated
-    st.success(f"**Translation:** {translated}")
+    st.session_state.translated_text = translated_text
+    st.success(f"**Translation:** {translated_text}")
 
     try:
-        audio_bytes = text_to_speech_bytes(translated)
+        audio_bytes = text_to_speech_bytes(translated_text)
         st.audio(audio_bytes, format="audio/mp3", autoplay=True)
     except Exception as exc:
         st.warning(f"Text-to-speech failed: {exc}")
 
     st.download_button(
         label="Download transcript (.txt)",
-        data=translated,
+        data=translated_text,
         file_name="braillebridge_transcript.txt",
         mime="text/plain",
     )

@@ -1,7 +1,8 @@
-ultralytics
+ultralytics==8.4.57
 streamlit
 opencv-python-headless
 gtts
 anthropic
 streamlit-lottie
+numpy<2
 roboflow

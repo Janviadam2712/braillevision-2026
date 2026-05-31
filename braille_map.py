@@ -42,7 +42,7 @@ def dots_to_char(active_dots: list) -> str:
     Returns '?' if pattern not found.
     """
     key = tuple(sorted(active_dots))
-    return BRAILLE_MAP.get(key, '?')
+    return BRAILLE_MAP.get(key, '')
 
 
 def test_mapping():
