@@ -43,8 +43,7 @@ def get_context(translated_text: str) -> str:
         )
         return response.content[0].text.strip()
     except Exception:
-        return f"'{translated_text}' — Braille translation complete. Add Anthropic API credits to enable AI context."
-
+        return f"Translation complete: '{translated_text}'"
 
 def chat_assistant(user_question: str, translated_text: str, history: list):
     try:
@@ -63,6 +62,6 @@ Answer questions briefly and helpfully."""
         history.append({"role": "assistant", "content": reply})
         return reply, history
     except Exception:
-        return f"Translation complete: '{translated_text}' — AI context ready."
+        fallback = "Chat ready. Add Anthropic API credits to enable AI responses."
         history.append({"role": "assistant", "content": fallback})
         return fallback, history

@@ -199,14 +199,14 @@ def main():
         st.image(
             cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB),
             caption="Input image",
-            use_container_width=True,
+            width='stretch',
         )
     with right:
         plotted = result.plot()
         st.image(
             cv2.cvtColor(plotted, cv2.COLOR_BGR2RGB),
             caption="YOLO detections",
-            use_container_width=True,
+            width='stretch',
         )
 
     if not translated_text:
@@ -260,12 +260,10 @@ def _render_context_and_chat():
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         prior = st.session_state.chat_history[:-1]
         with st.spinner("Thinking…"):
-            reply = chat_assistant(
-                prompt,
-                st.session_state.get("translated_text", ""),
-                prior,
+            reply, st.session_state.chat_history = chat_assistant(
+                prompt, translated, st.session_state.chat_history
             )
-        st.session_state.chat_history.append({"role": "assistant", "content": reply})
+        st.write(reply)
         st.rerun()
 
 
