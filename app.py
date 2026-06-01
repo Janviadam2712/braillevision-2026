@@ -197,14 +197,39 @@ def run_translation(image_bgr):
         cls_id = int(box.cls[0])
         conf = float(box.conf[0])
         x_center = float(box.xywh[0][0])
+        y_center = float(box.xywh[0][1])
+        height = float(box.xywh[0][3])
         if conf > 0.4:
             letter = model.names[cls_id]
-            detections.append((x_center, letter, conf))
-    detections.sort(key=lambda d: d[0])
-    text = "".join([d[1] for d in detections]).upper()
-    avg_conf = sum(d[2] for d in detections) / len(detections) if detections else 0
+            detections.append((x_center, y_center, height, letter, conf))
+
+    translated_text = ""
+    avg_conf = 0
+
+    if detections:
+        avg_height = sum(d[2] for d in detections) / len(detections)
+        row_threshold = avg_height * 0.6
+
+        detections.sort(key=lambda d: d[1])
+
+        rows = []
+        current_row = [detections[0]]
+        for det in detections[1:]:
+            if abs(det[1] - current_row[0][1]) <= row_threshold:
+                current_row.append(det)
+            else:
+                rows.append(current_row)
+                current_row = [det]
+        rows.append(current_row)
+
+        for row in rows:
+            row.sort(key=lambda d: d[0])
+
+        row_texts = [" ".join(d[3] for d in row) for row in rows]
+        translated_text = "  ".join(row_texts).upper()
+        avg_conf = sum(d[4] for d in detections) / len(detections)
     annotated = results[0].plot()
-    return text, len(detections), avg_conf, annotated
+    return translated_text, len(detections), avg_conf, annotated
  
 def make_audio(text):
     try:

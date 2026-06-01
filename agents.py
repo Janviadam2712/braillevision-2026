@@ -46,23 +46,17 @@ Answer questions briefly and helpfully."""
         return reply, history
     except Exception:
         q = user_question.lower()
-        text_lower = translated_text.lower()
-
-        if any(w in text_lower for w in ['aspirin', 'paracetamol', 'ibuprofen', 'amoxicillin', 'mg', 'ml']):
-            if any(w in q for w in ['safe', 'diabetes', 'diabetic']):
-                reply = f"'{translated_text}' appears to be a medication. Always consult a pharmacist or doctor before taking any medicine, especially with existing conditions."
-            elif any(w in q for w in ['dose', 'dosage', 'how much', 'take']):
-                reply = f"For dosage information about '{translated_text}', check the full medicine leaflet or ask your pharmacist."
-            else:
-                reply = f"'{translated_text}' is a pharmaceutical product label. BrailleBridge read this from the Braille embossing on the packaging."
-        elif any(w in text_lower for w in ['hello', 'hi', 'hey']):
-            reply = f"'{translated_text}' is a greeting in Braille — commonly found on welcome signs, greeting cards, or educational Braille materials."
-        elif any(w in text_lower for w in ['exit', 'caution', 'warning', 'danger', 'stop']):
-            reply = f"'{translated_text}' is a safety or directional sign. This type of Braille is found on emergency exits, hazmat labels, and warning signs."
-        elif any(w in q for w in ['what', 'mean', 'say', 'read', 'is']):
-            reply = f"The Braille reads: '{translated_text}'. Upload a clearer close-up image of a single word for best results."
+        if any(w in q for w in ['what', 'mean', 'say', 'read', 'spell']):
+            reply = f"The Braille translates to: '{translated_text}'"
+        elif any(w in q for w in ['where', 'found', 'object', 'label', 'surface']):
+            reply = f"'{translated_text}' in Braille is typically found on books, medicine labels, elevator buttons, or safety signs."
+        elif any(w in q for w in ['how', 'work', 'detect', 'yolo', 'model']):
+            reply = "BrailleBridge uses YOLOv8 to detect each Braille cell, classifies it by the letter it represents, then reads them left-to-right to form the translation."
+        elif any(w in q for w in ['safe', 'medicine', 'drug', 'dose', 'take']):
+            reply = "For medical decisions always consult a pharmacist or doctor. BrailleBridge reads the label — it does not provide medical advice."
+        elif any(w in q for w in ['hello', 'hi', 'who']):
+            reply = "I am BrailleBridge, an AI assistant that translates physical Braille to English. Ask me about any translation."
         else:
-            reply = f"BrailleBridge detected: '{translated_text}'. This was read from the Braille embossing in your image using YOLOv8 with 89% average confidence."
-
+            reply = f"BrailleBridge read '{translated_text}' from your Braille image. Ask me what it means, where it might appear, or how the detection works."
         history.append({"role": "assistant", "content": reply})
         return reply, history
