@@ -1,181 +1,191 @@
-# app.py — BrailleBridge
-# Streamlit app: camera/upload → YOLO → Braille → English + TTS + AI context
-
-from __future__ import annotations
-
-import io
-from pathlib import Path
-
+import streamlit as st
 import cv2
 import numpy as np
-import streamlit as st
+import io
 from gtts import gTTS
 from ultralytics import YOLO
-
-from agents import chat_assistant, get_context
-from braille_map import BRAILLE_MAP, dots_to_char
-
-MODEL_PATH = Path(__file__).resolve().parent / "best.pt"
-
-CUSTOM_CSS = """
+from agents import get_context, chat_assistant
+ 
+# ── Page config ──────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="BrailleBridge",
+    page_icon="👁",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+ 
+# ── Brand CSS ─────────────────────────────────────────────────────────────────
+st.markdown("""
 <style>
-    /* Fix chat input box */
-.stChatInput textarea {
-    background-color: #ffffff !important;
-    color: #111111 !important;
-    border: 1px solid #F97316 !important;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+ 
+* { font-family: 'Inter', sans-serif; }
+ 
+.stApp { background-color: #FEFCE8 !important; }
+ 
+/* Hide default streamlit chrome */
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 0 !important; max-width: 1200px; }
+ 
+/* ── Header ── */
+.bb-header {
+    background: #111111;
+    padding: 14px 24px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+.bb-header-left { display: flex; align-items: center; gap: 12px; }
+.bb-icon {
+    width: 36px; height: 36px;
+    background: #F97316;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+}
+.bb-title { color: #fff; font-weight: 700; font-size: 17px; margin: 0; }
+.bb-sub { color: #888; font-size: 11px; margin: 0; }
+.bb-badge {
+    background: #F97316; color: #111;
+    font-size: 11px; font-weight: 600;
+    padding: 4px 12px; border-radius: 20px;
+}
+ 
+/* ── Labels ── */
+.bb-label {
+    font-size: 11px; color: #999; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 10px;
+}
+ 
+/* ── Cards ── */
+.bb-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+ 
+/* ── Translation box ── */
+.bb-translation {
+    background: #f0fdf4;
+    border: 1px solid #86efac;
+    border-radius: 10px;
+    padding: 16px;
+    margin: 12px 0;
+}
+.bb-translation-text {
+    font-size: 24px; font-weight: 700;
+    color: #111; letter-spacing: 0.1em; margin: 0;
+}
+.bb-translation-meta { font-size: 11px; color: #888; margin: 4px 0 0; }
+ 
+/* ── Context ── */
+.bb-context {
+    border-left: 3px solid #F97316;
+    background: #fff;
+    border-top: 1px solid #e5e7eb;
+    border-right: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+    border-radius: 0 8px 8px 0;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+}
+.bb-context-label {
+    font-size: 11px; color: #F97316; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 0 0 4px;
+}
+.bb-context-text { font-size: 13px; color: #555; margin: 0; }
+ 
+/* ── Buttons ── */
+.stButton > button {
+    background: #F97316 !important;
+    color: #111 !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    font-size: 14px !important;
+    padding: 10px 20px !important;
+    width: 100% !important;
+}
+.stDownloadButton > button {
+    background: #111 !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+}
+ 
+/* ── Chat ── */
+[data-testid="stChatInput"] textarea {
+    background: #fff !important;
+    color: #111 !important;
+    border: 1.5px solid #F97316 !important;
     border-radius: 8px !important;
 }
-
-.stChatInput {
-    background-color: #ffffff !important;
-}
 [data-testid="stChatInput"] {
-    background-color: #ffffff !important;
-}
-[data-testid="stChatInput"] textarea {
-    background-color: #ffffff !important;
-    color: #111111 !important;
-    border: 1px solid #F97316 !important;
+    background: #fff !important;
 }
 .stChatFloatingInputContainer {
-    background-color: #ffffff !important;
+    background: #FEFCE8 !important;
+    border-top: 1px solid #e5e7eb !important;
 }
+ 
+/* ── File uploader ── */
+[data-testid="stFileUploader"] {
+    border: 2px dashed #F97316 !important;
+    border-radius: 10px !important;
+    background: #fff !important;
+}
+ 
+/* ── Radio ── */
+.stRadio [data-baseweb="radio"] { gap: 16px; }
 </style>
-"""
-
-CHAR_TO_DOTS = {char: list(dots) for dots, char in BRAILLE_MAP.items()}
-
-
-@st.cache_resource(show_spinner="Loading YOLOv8 model…")
-def load_model(weights_path: str):
-    return YOLO(weights_path)
-
-
-def _read_image_bgr(source) -> np.ndarray | None:
-    """Decode Streamlit camera/upload bytes to BGR numpy array."""
-    if source is None:
+""", unsafe_allow_html=True)
+ 
+# ── Header ───────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="bb-header">
+    <div class="bb-header-left">
+        <div class="bb-icon">👁</div>
+        <div>
+            <p class="bb-title">BrailleBridge</p>
+            <p class="bb-sub">Point. Read. Understand.</p>
+        </div>
+    </div>
+    <span class="bb-badge">AI-powered</span>
+</div>
+""", unsafe_allow_html=True)
+ 
+# ── Session state ─────────────────────────────────────────────────────────────
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "translated_text" not in st.session_state:
+    st.session_state.translated_text = ""
+if "last_result" not in st.session_state:
+    st.session_state.last_result = None
+ 
+# ── Load model (cached) ───────────────────────────────────────────────────────
+@st.cache_resource
+def load_model():
+    try:
+        return YOLO("best.pt")
+    except Exception as e:
         return None
-    raw = source.getvalue() if hasattr(source, "getvalue") else source
-    if not raw:
-        return None
-    arr = np.frombuffer(raw, dtype=np.uint8)
-    image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    return image
-
-
-def _box_center_xy(box) -> tuple[float, float]:
-    xyxy = box.xyxy[0].cpu().numpy()
-    return float((xyxy[0] + xyxy[2]) / 2), float((xyxy[1] + xyxy[3]) / 2)
-
-
-def _box_width(box) -> float:
-    xyxy = box.xyxy[0].cpu().numpy()
-    return float(xyxy[2] - xyxy[0])
-
-
-def _label_for_box(model, box) -> str:
-    cls_id = int(box.cls[0])
-    return str(model.names.get(cls_id, model.names[cls_id])).strip()
-
-
-def _char_from_class_label(label: str) -> str | None:
-    """If YOLO class is A–Z, map through braille dot pattern → dots_to_char."""
-    key = label.upper()
-    if len(key) == 1 and key.isalpha():
-        dots = CHAR_TO_DOTS.get(key.lower())
-        if dots is not None:
-            return dots_to_char(dots)
-    if label.isdigit() and 1 <= int(label) <= 6:
-        return dots_to_char([int(label)])
-    return None
-
-
-def _infer_dot_in_cell(cx: float, cy: float, xmin: float, ymin: float, w: float, h: float) -> int:
-    nx = (cx - xmin) / max(w, 1.0)
-    ny = (cy - ymin) / max(h, 1.0)
-    col = 0 if nx < 0.5 else 1
-    row = min(2, int(ny * 3.0))
-    grid = {(0, 0): 1, (0, 1): 2, (0, 2): 3, (1, 0): 4, (1, 1): 5, (1, 2): 6}
-    return grid[(col, row)]
-
-
-def run_inference(model, image_bgr: np.ndarray):
-    return model(image_bgr, verbose=False)
-
-
-def text_to_speech_bytes(text: str) -> bytes:
-    buffer = io.BytesIO()
-    gTTS(text=text, lang="en").write_to_fp(buffer)
-    buffer.seek(0)
-    return buffer.read()
-
-
-def init_session_state():
-    defaults = {
-        "chat_history": [],
-        "translated_text": "",
-        "last_context": "",
-    }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-
-
-def main():
-    st.set_page_config(
-        page_title="BrailleBridge",
-        page_icon="👁",
-        layout="wide",
-    )
-    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-    init_session_state()
-
-    st.title("BrailleBridge")
-    st.caption("Point. Read. Understand.")
-
-    model = None
-    if not MODEL_PATH.is_file():
-        st.warning(
-            f"Model weights not found at `{MODEL_PATH.name}`. "
-            "Download **best.pt** from the link in `model/model_info.md` "
-            "and place it in the project root."
-        )
-    else:
-        try:
-            model = load_model(str(MODEL_PATH))
-        except Exception as exc:
-            st.warning(f"Could not load model: {exc}")
-
-    col_cam, col_upload = st.columns(2)
-    with col_cam:
-        camera_photo = st.camera_input("Capture Braille with your camera")
-    with col_upload:
-        uploaded = st.file_uploader(
-            "Or upload an image",
-            type=["jpg", "jpeg", "png", "webp", "bmp"],
-        )
-
-    image_source = camera_photo or uploaded
-    if image_source is None:
-        st.warning("Take a photo or upload an image to translate Braille.")
-        _render_context_and_chat()
-        return
-
-    if model is None:
-        st.warning("Translation is unavailable until **best.pt** is installed.")
-        _render_context_and_chat()
-        return
-
-    image_bgr = _read_image_bgr(image_source)
-    if image_bgr is None:
-        st.warning("Could not read the image. Try another photo or file format.")
-        _render_context_and_chat()
-        return
-
-    with st.spinner("Running Braille detection…"):
-        results = run_inference(model, image_bgr)
-
+ 
+model = load_model()
+ 
+if model is None:
+    st.error("⚠️ best.pt not found. Place your trained model in the project root.")
+    st.stop()
+ 
+# ── Helper functions ──────────────────────────────────────────────────────────
+def run_translation(image_bgr):
+    results = model(image_bgr, verbose=False)
     detections = []
     for box in results[0].boxes:
         cls_id = int(box.cls[0])
@@ -183,89 +193,146 @@ def main():
         x_center = float(box.xywh[0][0])
         if conf > 0.4:
             letter = model.names[cls_id]
-            detections.append((x_center, letter))
+            detections.append((x_center, letter, conf))
     detections.sort(key=lambda d: d[0])
-    translated_text = ''.join([d[1] for d in detections]).upper()
-
-    if not results:
-        st.warning("No inference result returned.")
-        _render_context_and_chat()
-        return
-
-    result = results[0]
-
-    left, right = st.columns([1, 1])
-    with left:
-        st.image(
-            cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB),
-            caption="Input image",
-            width='stretch',
-        )
-    with right:
-        plotted = result.plot()
-        st.image(
-            cv2.cvtColor(plotted, cv2.COLOR_BGR2RGB),
-            caption="YOLO detections",
-            width='stretch',
-        )
-
-    if not translated_text:
-        st.warning(
-            "No Braille characters detected. Try better lighting, closer framing, "
-            "or a clearer view of the dots."
-        )
-        st.session_state.translated_text = ""
-        _render_context_and_chat()
-        return
-
-    st.session_state.translated_text = translated_text
-    st.success(f"**Translation:** {translated_text}")
-
+    text = "".join([d[1] for d in detections]).upper()
+    avg_conf = sum(d[2] for d in detections) / len(detections) if detections else 0
+    annotated = results[0].plot()
+    return text, len(detections), avg_conf, annotated
+ 
+def make_audio(text):
     try:
-        audio_bytes = text_to_speech_bytes(translated_text)
-        st.audio(audio_bytes, format="audio/mp3", autoplay=True)
-    except Exception as exc:
-        st.warning(f"Text-to-speech failed: {exc}")
-
-    st.download_button(
-        label="Download transcript (.txt)",
-        data=translated_text,
-        file_name="braillebridge_transcript.txt",
-        mime="text/plain",
+        buf = io.BytesIO()
+        gTTS(text=text, lang="en", slow=False).write_to_fp(buf)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return None
+ 
+# ── Main layout ───────────────────────────────────────────────────────────────
+col_left, col_right = st.columns([1, 1], gap="large")
+ 
+# ── LEFT: Input ───────────────────────────────────────────────────────────────
+with col_left:
+    st.markdown('<p class="bb-label">Input</p>', unsafe_allow_html=True)
+ 
+    mode = st.radio(
+        "Input mode",
+        ["Upload Image", "Camera"],
+        horizontal=True,
+        label_visibility="collapsed"
     )
-
-    _render_context_and_chat()
-
-
-def _render_context_and_chat():
-    st.divider()
-    st.subheader("Context")
-    translated = st.session_state.get("translated_text", "")
-    if translated:
-        with st.spinner("Generating context…"):
-            context = get_context(translated)
-        st.session_state.last_context = context
-        st.info(context)
+ 
+    image_bgr = None
+ 
+    if mode == "Upload Image":
+        uploaded = st.file_uploader(
+            "Drop a Braille image here",
+            type=["jpg", "jpeg", "png"],
+            label_visibility="visible"
+        )
+        if uploaded:
+            arr = np.frombuffer(uploaded.read(), np.uint8)
+            image_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     else:
-        st.caption("Context appears here after a successful translation.")
-
-    st.divider()
-    st.subheader("Ask BrailleBridge")
-
+        cam = st.camera_input("Take a photo of Braille")
+        if cam:
+            arr = np.frombuffer(cam.read(), np.uint8)
+            image_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+ 
+    translate_btn = st.button("👁 Translate Braille", type="primary")
+ 
+# ── RIGHT: Output ─────────────────────────────────────────────────────────────
+with col_right:
+    st.markdown('<p class="bb-label">Translation</p>', unsafe_allow_html=True)
+ 
+    if translate_btn and image_bgr is not None:
+        with st.spinner("Detecting Braille dots..."):
+            text, count, conf, annotated = run_translation(image_bgr)
+            st.session_state.translated_text = text
+            st.session_state.last_result = {
+                "input": image_bgr,
+                "annotated": annotated,
+                "text": text,
+                "count": count,
+                "conf": conf
+            }
+ 
+    if st.session_state.last_result:
+        r = st.session_state.last_result
+ 
+        # Images
+        img_col1, img_col2 = st.columns(2)
+        with img_col1:
+            st.image(
+                cv2.cvtColor(r["input"], cv2.COLOR_BGR2RGB),
+                caption="Input image"
+            )
+        with img_col2:
+            st.image(
+                cv2.cvtColor(r["annotated"], cv2.COLOR_BGR2RGB),
+                caption="YOLO detections"
+            )
+ 
+        if r["text"]:
+            # Translation result
+            st.markdown(f"""
+            <div class="bb-translation">
+                <p class="bb-translation-text">{r["text"]}</p>
+                <p class="bb-translation-meta">
+                    {r["count"]} characters detected &nbsp;·&nbsp;
+                    Avg confidence: {r["conf"]:.0%}
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+ 
+            # Audio
+            audio = make_audio(r["text"])
+            if audio:
+                st.audio(audio, format="audio/mp3")
+ 
+            # Download
+            st.download_button(
+                "📄 Download Transcript (.txt)",
+                data=r["text"],
+                file_name="braille_transcript.txt",
+                mime="text/plain"
+            )
+        else:
+            st.warning("No Braille characters detected. Try a clearer or closer image.")
+ 
+    elif not translate_btn:
+        st.info("Upload an image and press **Translate Braille** to begin.")
+ 
+# ── Context + Chat ────────────────────────────────────────────────────────────
+if st.session_state.translated_text:
+    st.markdown("---")
+ 
+    # Context
+    context = get_context(st.session_state.translated_text)
+    st.markdown(f"""
+    <div class="bb-context">
+        <p class="bb-context-label">✨ AI Context</p>
+        <p class="bb-context-text">{context}</p>
+    </div>
+    """, unsafe_allow_html=True)
+ 
+    # Chat
+    st.markdown('<p class="bb-label">Ask BrailleBridge</p>', unsafe_allow_html=True)
+ 
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    if prompt := st.chat_input("Ask about this translation…"):
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
-        prior = st.session_state.chat_history[:-1]
-        with st.spinner("Thinking…"):
-            reply, st.session_state.chat_history = chat_assistant(
-                prompt, translated, st.session_state.chat_history
-            )
-        st.write(reply)
-        st.rerun()
-
-
-if __name__ == "__main__":
-    main()
+            st.write(msg["content"])
+ 
+    if user_q := st.chat_input("Ask about this translation..."):
+        with st.chat_message("user"):
+            st.write(user_q)
+ 
+        reply, st.session_state.chat_history = chat_assistant(
+            user_q,
+            st.session_state.translated_text,
+            st.session_state.chat_history
+        )
+ 
+        with st.chat_message("assistant"):
+            st.write(reply)
