@@ -144,6 +144,12 @@ st.markdown("""
  
 /* ── Radio ── */
 .stRadio [data-baseweb="radio"] { gap: 16px; }
+section[data-testid="stBottom"] {
+    background-color: #FEFCE8 !important;
+}
+section[data-testid="stBottom"] > div {
+    background-color: #FEFCE8 !important;
+}
 </style>
 """, unsafe_allow_html=True)
  
